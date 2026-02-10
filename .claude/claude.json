@@ -1,0 +1,21 @@
+{
+  "skills": [
+    "./.claude/skills/pdf",
+    "./.claude/skills/docx",
+    "./.claude/skills/xlsx",
+    "./.claude/skills/pptx",
+    "./.claude/skills/algorithmic-art",
+    "./.claude/skills/brand-guidelines",
+    "./.claude/skills/canvas-design",
+    "./.claude/skills/doc-coauthoring",
+    "./.claude/skills/frontend-design",
+    "./.claude/skills/internal-comms",
+    "./.claude/skills/mcp-builder",
+    "./.claude/skills/skill-creator",
+    "./.claude/skills/slack-gif-creator",
+    "./.claude/skills/theme-factory",
+    "./.claude/skills/web-artifacts-builder",
+    "./.claude/skills/webapp-testing",
+    "./.claude/skills/ui-ux-pro-max"
+  ]
+}
