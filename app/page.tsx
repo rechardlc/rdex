@@ -1,7 +1,7 @@
 'use client';
 
 import { OrderBook } from '@/components/OrderBook';
-import { KlineChart } from '@/components/KlineChart';
+import { OptimizedKlineChart } from '@/lib/kline';
 import { AssetCalculator } from '@/components/AssetCalculator';
 import { LiveTrades } from '@/components/LiveTrades';
 import { useBinanceOrderBook } from '@/hooks/useBinanceOrderBook';
@@ -29,7 +29,12 @@ export default function Home() {
         {/* Left column: Chart and Trades */}
         <div className="lg:col-span-2 space-y-4">
           {/* K-line Chart */}
-          <KlineChart symbol="btcusdt" interval="1d" />
+          <OptimizedKlineChart
+            symbol="btcusdt"
+            interval="1m"
+            staleTime={5 * 60 * 1000}
+            refetchOnWindowFocus={false}
+          />
 
           {/* Recent Trades */}
           {/* <LiveTrades /> */}

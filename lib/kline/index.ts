@@ -56,7 +56,6 @@
 
 // ============= 核心组件 =============
 export { OptimizedKlineChart } from '@/components/OptimizedKlineChart';
-export { KlineChart } from '@/components/KlineChart';
 
 // ============= Provider 和系统工厂 =============
 export { KlineChartProvider, createKlineChartSystem } from './KlineChartProvider';

@@ -2,9 +2,9 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
-import { CandlestickData, KlineInterval } from '../kline/types';
-import { BinanceDataSource } from '../kline/BinanceDataSource';
-import { WebSocketManager } from '../kline/WebSocketManager';
+import { CandlestickData, KlineInterval } from '@/lib/kline/types';
+import { BinanceDataSource } from '@/lib/kline/BinanceDataSource';
+import { WebSocketManager } from '@/lib/kline/WebSocketManager';
 import { UTCTimestamp } from 'lightweight-charts';
 
 /**
@@ -57,7 +57,7 @@ export function useKlineData(options: UseKlineDataOptions) {
     refetchOnWindowFocus = false,
   } = options;
 
-  const dataSourceRef = useRef<BinanceDataSource>();
+  const dataSourceRef = useRef<BinanceDataSource | undefined>(undefined);
 
   // 懒加载数据源
   if (!dataSourceRef.current) {

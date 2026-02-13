@@ -10,7 +10,9 @@ import { CacheItem } from './types';
  * - 性能优化：避免重复请求相同数据
  */
 export class DataCache {
+  // 单例实例
   private static instance: DataCache;
+  // 缓存项
   private cache = new Map<string, CacheItem<any>>();
   private maxSize = 50; // 最大缓存条目数
   private defaultExpiry = 5 * 60 * 1000; // 默认 5 分钟过期
@@ -37,9 +39,9 @@ export class DataCache {
   set<T>(key: string, data: T, expiry?: number): void {
     // 如果缓存已满，删除最旧的条目（LRU）
     if (this.cache.size >= this.maxSize) {
+      // 获取最旧的键：LRU算法，删除最久未使用的数据
       const oldestKey = this.cache.keys().next().value;
-      this.cache.delete(oldestKey);
-      console.log(`[DataCache] Evicted oldest entry: ${oldestKey}`);
+      this.cache.delete(oldestKey || '');
     }
 
     const cacheItem: CacheItem<T> = {
@@ -49,7 +51,6 @@ export class DataCache {
     };
 
     this.cache.set(key, cacheItem);
-    console.log(`[DataCache] Cached: ${key}, expires in ${cacheItem.expiry}ms`);
   }
 
   /**
@@ -61,20 +62,14 @@ export class DataCache {
   get<T>(key: string): T | null {
     const item = this.cache.get(key);
 
-    if (!item) {
-      console.log(`[DataCache] Cache miss: ${key}`);
-      return null;
-    }
+    if (!item) return null;
 
     // 检查是否过期
     const age = Date.now() - item.timestamp;
     if (age > item.expiry) {
-      console.log(`[DataCache] Cache expired: ${key} (age: ${age}ms)`);
       this.cache.delete(key);
       return null;
     }
-
-    console.log(`[DataCache] Cache hit: ${key} (age: ${age}ms)`);
 
     // LRU：将访问的项移到最后（删除再重新插入）
     this.cache.delete(key);
@@ -134,7 +129,6 @@ export class DataCache {
    */
   setMaxSize(size: number): void {
     this.maxSize = size;
-    console.log(`[DataCache] Max size set to: ${size}`);
   }
 
   /**
@@ -142,6 +136,5 @@ export class DataCache {
    */
   setDefaultExpiry(expiry: number): void {
     this.defaultExpiry = expiry;
-    console.log(`[DataCache] Default expiry set to: ${expiry}ms`);
   }
 }

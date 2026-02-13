@@ -78,11 +78,11 @@ export class DataSourceError extends Error {
  * WebSocket 连接状态
  */
 export enum WebSocketState {
-  CONNECTING = 'CONNECTING',
-  CONNECTED = 'CONNECTED',
-  DISCONNECTED = 'DISCONNECTED',
-  RECONNECTING = 'RECONNECTING',
-  FAILED = 'FAILED',
+  CONNECTING = 'CONNECTING', // 连接中
+  CONNECTED = 'CONNECTED', // 已连接
+  DISCONNECTED = 'DISCONNECTED', // 已断开
+  RECONNECTING = 'RECONNECTING', // 重连中
+  FAILED = 'FAILED', // 连接失败
 }
 
 /**

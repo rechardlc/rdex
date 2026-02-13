@@ -30,7 +30,9 @@ export class BinanceDataSource implements IKlineDataSource {
   private readonly RETRY_DELAY = 1000;
 
   constructor(options: { enableCache?: boolean; cacheExpiry?: number } = {}) {
+    // WebSocket 管理器单例
     this.wsManager = WebSocketManager.getInstance();
+    // 数据缓存单例
     this.cache = DataCache.getInstance();
     this.enableCache = options.enableCache ?? true;
     this.cacheExpiry = options.cacheExpiry ?? 5 * 60 * 1000; // 默认 5 分钟
@@ -53,10 +55,7 @@ export class BinanceDataSource implements IKlineDataSource {
     // 检查缓存
     if (this.enableCache) {
       const cached = this.cache.get<CandlestickData[]>(cacheKey);
-      if (cached) {
-        console.log(`[BinanceDataSource] Using cached data for ${cacheKey}`);
-        return cached;
-      }
+      if (cached) return cached;
     }
 
     // 带重试的请求
@@ -158,7 +157,7 @@ export class BinanceDataSource implements IKlineDataSource {
   }
 
   /**
-   * 订阅实时 K 线数据
+   * 订阅实时 K 线数据（使用 RAF 节流优化性能）
    */
   subscribe(
     symbol: string,
@@ -169,6 +168,19 @@ export class BinanceDataSource implements IKlineDataSource {
     const url = `${this.WS_BASE}/${symbol.toLowerCase()}@kline_${interval}`;
 
     console.log(`[BinanceDataSource] Subscribing to ${key}`);
+
+    // RAF 节流状态
+    let latestData: CandlestickData | null = null;
+    let rafId: number | null = null;
+
+    // 在下一帧发送最新数据
+    const emitLatest = () => {
+      if (latestData) {
+        callback(latestData);
+        latestData = null;
+      }
+      rafId = null;
+    };
 
     // 使用 WebSocket 管理器订阅
     const unsubscribe = this.wsManager.subscribe(
@@ -203,7 +215,13 @@ export class BinanceDataSource implements IKlineDataSource {
             return;
           }
 
-          callback(data);
+          // 更新最新数据
+          latestData = data;
+
+          // 如果没有待处理的 RAF，安排在下一帧发送
+          if (!rafId) {
+            rafId = requestAnimationFrame(emitLatest);
+          }
         } catch (error) {
           console.error('[BinanceDataSource] Error processing WebSocket message:', error);
         }
@@ -211,7 +229,14 @@ export class BinanceDataSource implements IKlineDataSource {
       5 // 最大重连次数
     );
 
-    return unsubscribe;
+    // 返回取消订阅函数，确保清理 RAF
+    return () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      unsubscribe();
+    };
   }
 
   /**

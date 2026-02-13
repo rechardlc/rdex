@@ -11,9 +11,13 @@ import { WebSocketState, WebSocketSubscription } from './types';
  * - 资源清理：组件卸载时自动清理无用连接
  */
 export class WebSocketManager {
+  // 单例实例
   private static instance: WebSocketManager;
+  // WebSocket 连接池
   private connections = new Map<string, WebSocket>();
+  // 订阅者管理
   private subscriptions = new Map<string, WebSocketSubscription>();
+  // 重连定时器
   private reconnectTimers = new Map<string, NodeJS.Timeout>();
 
   private constructor() {}
@@ -167,6 +171,7 @@ export class WebSocketManager {
     subscription.state = WebSocketState.RECONNECTING;
 
     // 指数退避：1s, 2s, 4s, 8s, 16s
+    // 作用：避免频繁重连导致服务器压力
     const delay = Math.min(1000 * Math.pow(2, subscription.reconnectAttempts - 1), 16000);
     console.log(
       `[WebSocketManager] Scheduling reconnect for ${key} in ${delay}ms (attempt ${subscription.reconnectAttempts}/${subscription.maxReconnectAttempts})`
