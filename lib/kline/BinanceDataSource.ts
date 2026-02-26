@@ -91,6 +91,80 @@ export class BinanceDataSource implements IKlineDataSource {
   }
 
   /**
+   * 根据时间范围获取历史 K 线数据（带缓存和重试）
+   */
+  async fetchHistoricalByTimeRange(
+    symbol: string,
+    interval: KlineInterval,
+    options: {
+      startTime?: number;
+      endTime?: number;
+      limit?: number;
+    } = {}
+  ): Promise<CandlestickData[]> {
+    const { startTime, endTime, limit = 100 } = options;
+
+    // 验证参数
+    if (limit && (limit < 1 || limit > 1000)) {
+      throw new DataSourceError(
+        'Limit must be between 1 and 1000',
+        'INVALID_PARAMETER'
+      );
+    }
+
+    if (startTime && endTime && startTime >= endTime) {
+      throw new DataSourceError(
+        'startTime must be less than endTime',
+        'INVALID_PARAMETER'
+      );
+    }
+
+    // 生成缓存键
+    const cacheKey = `${symbol.toLowerCase()}_${interval}_${startTime || 'none'}_${endTime || 'none'}_${limit}`;
+
+    // 检查缓存
+    if (this.enableCache) {
+      const cached = this.cache.get<CandlestickData[]>(cacheKey);
+      if (cached) return cached;
+    }
+
+    // 带重试的请求
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
+      try {
+        const data = await this.fetchHistoricalByTimeRangeInternal(
+          symbol,
+          interval,
+          options
+        );
+
+        // 存入缓存
+        if (this.enableCache) {
+          this.cache.set(cacheKey, data, this.cacheExpiry);
+        }
+
+        return data;
+      } catch (error) {
+        lastError = error;
+        console.error(
+          `[BinanceDataSource] Fetch by time range attempt ${attempt}/${this.MAX_RETRIES} failed:`,
+          error
+        );
+
+        if (attempt < this.MAX_RETRIES) {
+          await this.delay(this.RETRY_DELAY * attempt);
+        }
+      }
+    }
+
+    throw new DataSourceError(
+      `Failed to fetch historical data by time range after ${this.MAX_RETRIES} attempts`,
+      'FETCH_FAILED',
+      lastError
+    );
+  }
+
+  /**
    * 实际的 REST API 请求
    */
   private async fetchHistoricalInternal(
@@ -99,6 +173,57 @@ export class BinanceDataSource implements IKlineDataSource {
     limit: number
   ): Promise<CandlestickData[]> {
     const url = `${this.REST_API_BASE}/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${limit}`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new DataSourceError(
+        `HTTP ${response.status}: ${response.statusText}`,
+        'HTTP_ERROR'
+      );
+    }
+
+    const data = await response.json();
+
+    // 验证响应数据
+    if (!Array.isArray(data)) {
+      throw new DataSourceError('Invalid response format: expected array', 'INVALID_FORMAT');
+    }
+
+    // 转换为标准格式
+    return data.map((kline: string[]) => this.parseKlineData(kline));
+  }
+
+  /**
+   * 根据时间范围的实际 REST API 请求
+   */
+  private async fetchHistoricalByTimeRangeInternal(
+    symbol: string,
+    interval: KlineInterval,
+    options: {
+      startTime?: number;
+      endTime?: number;
+      limit?: number;
+    }
+  ): Promise<CandlestickData[]> {
+    const { startTime, endTime, limit = 100 } = options;
+
+    // 构建 URL 参数
+    const params = new URLSearchParams({
+      symbol: symbol.toUpperCase(),
+      interval,
+      limit: limit.toString(),
+    });
+
+    if (startTime) {
+      params.append('startTime', startTime.toString());
+    }
+
+    if (endTime) {
+      params.append('endTime', endTime.toString());
+    }
+
+    const url = `${this.REST_API_BASE}/klines?${params.toString()}`;
 
     const response = await fetch(url);
 

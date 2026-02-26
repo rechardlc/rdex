@@ -8,8 +8,9 @@ import {
   ColorType,
   CandlestickSeries,
 } from 'lightweight-charts';
-import { Maximize2, Minimize2, AlertCircle } from 'lucide-react';
+import { Maximize2, Minimize2, AlertCircle, Loader2 } from 'lucide-react';
 import { useKlineData, useKlineSubscription } from '@/hooks/useKlineData';
+import { useAutoLoadKlineData } from '@/hooks/useAutoLoadKlineData';
 import { KlineInterval } from '@/lib/kline/types';
 
 /**
@@ -21,6 +22,7 @@ import { KlineInterval } from '@/lib/kline/types';
  * - ✅ 请求去重
  * - ✅ 更简洁的代码结构
  * - ✅ 更好的 React 集成
+ * - ✅ 自动加载历史数据（可选）
  */
 interface OptimizedKlineChartProps {
   symbol?: string;
@@ -29,6 +31,17 @@ interface OptimizedKlineChartProps {
   staleTime?: number;
   /** 是否启用后台重新验证 */
   refetchOnWindowFocus?: boolean;
+  /** 是否启用自动加载历史数据 */
+  enableAutoLoad?: boolean;
+  /** 自动加载配置 */
+  autoLoadOptions?: {
+    /** 每页数据条数 */
+    pageSize?: number;
+    /** 触发加载的阈值（距离边缘的 K 线数量） */
+    threshold?: number;
+    /** 最大页数限制 */
+    maxPages?: number;
+  };
 }
 
 export function OptimizedKlineChart({
@@ -36,6 +49,8 @@ export function OptimizedKlineChart({
   interval = '1m',
   staleTime = 5 * 60 * 1000,
   refetchOnWindowFocus = false,
+  enableAutoLoad = false,
+  autoLoadOptions = {},
 }: OptimizedKlineChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -45,13 +60,28 @@ export function OptimizedKlineChart({
 
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // 使用 TanStack Query 获取历史数据
-  const { data, isLoading, error, refetch } = useKlineData({
+  // 根据配置选择使用普通加载或自动加载
+  const normalData = useKlineData({
     symbol,
     interval,
     staleTime,
     refetchOnWindowFocus,
+    enabled: !enableAutoLoad,
   });
+
+  const autoLoadData = useAutoLoadKlineData({
+    symbol,
+    interval,
+    chartRef: chartRef.current,
+    autoLoad: enableAutoLoad,
+    staleTime,
+    ...autoLoadOptions,
+  });
+
+  // 根据模式选择数据源
+  const { data, isLoading, error, refetch } = enableAutoLoad ? autoLoadData : normalData;
+  const isFetchingPrevious = enableAutoLoad ? autoLoadData.isFetchingPrevious : false;
+  const hasMore = enableAutoLoad ? autoLoadData.hasMore : false;
 
   // 订阅实时数据更新
   useKlineSubscription({
@@ -85,6 +115,21 @@ export function OptimizedKlineChart({
   };
 
   /**
+   * 根据容器宽度计算合适的 barSpacing
+   */
+  const calculateBarSpacing = useCallback((width: number): number => {
+    if (width < 768) {
+      return 4; // 小屏幕
+    } else if (width < 1200) {
+      return 6; // 中等屏幕
+    } else if (width < 1600) {
+      return 8; // 大屏幕
+    } else {
+      return 10; // 超大屏幕
+    }
+  }, []);
+
+  /**
    * 防抖 resize 处理
    */
   const handleResize = useCallback(() => {
@@ -94,12 +139,19 @@ export function OptimizedKlineChart({
 
     resizeTimeoutRef.current = setTimeout(() => {
       if (chartContainerRef.current && chartRef.current) {
+        const width = chartContainerRef.current.clientWidth;
+        const barSpacing = calculateBarSpacing(width);
+
         chartRef.current.applyOptions({
-          width: chartContainerRef.current.clientWidth,
+          width,
+        });
+
+        chartRef.current.timeScale().applyOptions({
+          barSpacing,
         });
       }
     }, 100);
-  }, []);
+  }, [calculateBarSpacing]);
 
   /**
    * 监听全屏状态变化
@@ -110,9 +162,16 @@ export function OptimizedKlineChart({
 
       if (chartContainerRef.current && chartRef.current) {
         setTimeout(() => {
+          const width = chartContainerRef.current!.clientWidth;
+          const barSpacing = calculateBarSpacing(width);
+
           chartRef.current?.applyOptions({
-            width: chartContainerRef.current!.clientWidth,
+            width,
             height: document.fullscreenElement ? window.innerHeight - 60 : 400,
+          });
+
+          chartRef.current?.timeScale().applyOptions({
+            barSpacing,
           });
         }, 100);
       }
@@ -122,13 +181,16 @@ export function OptimizedKlineChart({
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
-  }, []);
+  }, [calculateBarSpacing]);
 
   /**
    * 初始化图表
    */
   useEffect(() => {
     if (!chartContainerRef.current) return;
+
+    const width = chartContainerRef.current.clientWidth;
+    const barSpacing = calculateBarSpacing(width);
 
     const chart = createChart(chartContainerRef.current, {
       layout: {
@@ -139,17 +201,19 @@ export function OptimizedKlineChart({
         vertLines: { color: '#1F2937' },
         horzLines: { color: '#1F2937' },
       },
-      width: chartContainerRef.current.clientWidth,
+      width,
       height: 400,
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
         borderColor: '#374151',
+        barSpacing,
       },
       rightPriceScale: {
         borderColor: '#374151',
       },
       crosshair: {
+        mode: 0, // 0 = Normal, 1 = Magnet
         vertLine: {
           color: '#6B7280',
           width: 1 as const,
@@ -186,15 +250,14 @@ export function OptimizedKlineChart({
       }
       chart.remove();
     };
-  }, [handleResize]);
+  }, [handleResize, calculateBarSpacing]);
 
   /**
    * 当数据加载完成后更新图表
    */
   useEffect(() => {
-    if (data && seriesRef.current && chartRef.current) {
+    if (data && seriesRef.current) {
       seriesRef.current.setData(data);
-      chartRef.current.timeScale().fitContent();
     }
   }, [data]);
 
@@ -236,6 +299,17 @@ export function OptimizedKlineChart({
                 Retry
               </button>
             </div>
+          )}
+          {enableAutoLoad && isFetchingPrevious && (
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />
+              <span className="text-xs text-gray-400">Loading history...</span>
+            </div>
+          )}
+          {enableAutoLoad && !hasMore && data && data.length > 100 && (
+            <span className="text-xs text-gray-500" title="No more historical data available">
+              📊 All data loaded
+            </span>
           )}
           <button
             onClick={toggleFullscreen}

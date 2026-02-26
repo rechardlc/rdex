@@ -41,6 +41,28 @@ export interface IKlineDataSource {
   ): Promise<CandlestickData[]>;
 
   /**
+   * 根据时间范围获取历史 K 线数据
+   *
+   * @param symbol 交易对标识（例如 'btcusdt'）
+   * @param interval K 线时间周期
+   * @param options 时间范围选项
+   * @param options.startTime 开始时间（Unix 时间戳，毫秒）
+   * @param options.endTime 结束时间（Unix 时间戳，毫秒）
+   * @param options.limit 返回的数据条数（最大 1000）
+   * @returns Promise<CandlestickData[]> 历史 K 线数据数组
+   * @throws {DataSourceError} 当数据获取失败时
+   */
+  fetchHistoricalByTimeRange(
+    symbol: string,
+    interval: KlineInterval,
+    options: {
+      startTime?: number;
+      endTime?: number;
+      limit?: number;
+    }
+  ): Promise<CandlestickData[]>;
+
+  /**
    * 订阅实时 K 线数据推送
    *
    * @param symbol 交易对标识
