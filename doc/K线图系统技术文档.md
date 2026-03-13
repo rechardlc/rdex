@@ -739,11 +739,18 @@ setTimeout(() => unsubscribe(), 10000);
 
 ---
 
+## 相关文档
+
+- **[OptimizedKlineChart React 重构文档](./OptimizedKlineChart-React-Refactoring.md)**：基于 React 最佳实践的 useEffect 重构、useSyncExternalStore 全屏订阅、性能优化说明
+
+---
+
 ## 项目结构
 
 ```
 components/
-  └── KlineChart.tsx          # K 线图组件
+  ├── KlineChart.tsx          # 经典 K 线图组件
+  └── OptimizedKlineChart.tsx # 优化版 K 线图（TanStack Query + React 最佳实践）
 
 lib/kline/
   ├── types.ts                # TypeScript 类型定义
@@ -791,6 +798,6 @@ lib/kline/
 
 ---
 
-**文档版本**: v1.0.0
-**最后更新**: 2026-02-10
-**技术栈**: React 18 + TypeScript 5 + lightweight-charts 4.x + WebSocket API
+**文档版本**: v1.1.0  
+**最后更新**: 2026-03-13  
+**技术栈**: React 19 + TypeScript 5 + lightweight-charts 5.x + TanStack Query + WebSocket API

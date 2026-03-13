@@ -1,4 +1,8 @@
-import { WebSocketState, WebSocketSubscription } from './types';
+import { WebSocketState, WebSocketSubscription, HeartbeatOptions } from './types';
+
+/** 心跳检测默认配置 */
+const DEFAULT_HEARTBEAT_INTERVAL = 30_000; // 检测间隔 30s
+const DEFAULT_HEARTBEAT_TIMEOUT = 60_000; // 无消息超时 60s 判定连接失效
 
 /**
  * WebSocket 连接管理器（单例模式）
@@ -6,6 +10,7 @@ import { WebSocketState, WebSocketSubscription } from './types';
  * 功能特性：
  * - 连接复用：同一 URL 只创建一个 WebSocket 实例
  * - 自动重连：连接断开后自动尝试重连（指数退避策略）
+ * - 心跳检测：空闲超时检测，发现假连接后主动断开触发重连
  * - 订阅管理：支持多个组件订阅同一个连接
  * - 状态追踪：实时追踪每个连接的状态
  * - 资源清理：组件卸载时自动清理无用连接
@@ -19,6 +24,10 @@ export class WebSocketManager {
   private subscriptions = new Map<string, WebSocketSubscription>();
   // 重连定时器
   private reconnectTimers = new Map<string, NodeJS.Timeout>();
+  // 心跳检测：上次收到消息的时间戳
+  private lastMessageTimes = new Map<string, number>();
+  // 心跳检测定时器
+  private heartbeatTimers = new Map<string, NodeJS.Timeout>();
 
   private constructor() {}
 
@@ -39,13 +48,15 @@ export class WebSocketManager {
    * @param url WebSocket 连接地址
    * @param callback 数据回调函数
    * @param maxReconnectAttempts 最大重连次数（默认 5）
+   * @param heartbeat 心跳检测配置（可选）
    * @returns unsubscribe 取消订阅函数
    */
   subscribe(
     key: string,
     url: string,
     callback: (data: any) => void,
-    maxReconnectAttempts = 5
+    maxReconnectAttempts = 5,
+    heartbeat?: HeartbeatOptions
   ): () => void {
     // 如果订阅已存在，直接添加回调
     if (this.subscriptions.has(key)) {
@@ -61,6 +72,7 @@ export class WebSocketManager {
         state: WebSocketState.CONNECTING,
         reconnectAttempts: 0,
         maxReconnectAttempts,
+        heartbeat,
       };
       this.subscriptions.set(key, subscription);
       this.connect(key);
@@ -105,9 +117,14 @@ export class WebSocketManager {
         console.log(`[WebSocketManager] Connected: ${key}`);
         subscription.state = WebSocketState.CONNECTED;
         subscription.reconnectAttempts = 0; // 重置重连计数
+        // 启动心跳检测
+        this.startHeartbeat(key);
       };
 
       ws.onmessage = (event) => {
+        // 收到任意消息即刷新心跳时间戳
+        this.lastMessageTimes.set(key, Date.now());
+
         try {
           const data = JSON.parse(event.data);
           // 将数据分发给所有订阅者
@@ -132,6 +149,7 @@ export class WebSocketManager {
         console.log(`[WebSocketManager] Closed: ${key}, code: ${event.code}`);
         subscription.state = WebSocketState.DISCONNECTED;
         this.connections.delete(key);
+        this.stopHeartbeat(key);
 
         // 如果还有订阅者，尝试重连
         if (subscription.callbacks.size > 0) {
@@ -143,6 +161,56 @@ export class WebSocketManager {
       subscription.state = WebSocketState.FAILED;
       this.scheduleReconnect(key);
     }
+  }
+
+  /**
+   * 启动心跳检测
+   * 采用空闲超时策略：若在 timeout 内未收到任何消息，判定连接失效并主动关闭以触发重连
+   */
+  private startHeartbeat(key: string): void {
+    const subscription = this.subscriptions.get(key);
+    if (!subscription) return;
+
+    const interval =
+      subscription.heartbeat?.interval ?? DEFAULT_HEARTBEAT_INTERVAL;
+    const timeout = subscription.heartbeat?.timeout ?? DEFAULT_HEARTBEAT_TIMEOUT;
+
+    this.lastMessageTimes.set(key, Date.now());
+
+    const check = (): void => {
+      const ws = this.connections.get(key);
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+      const lastTime = this.lastMessageTimes.get(key) ?? 0;
+      const elapsed = Date.now() - lastTime;
+
+      if (elapsed >= timeout) {
+        console.warn(
+          `[WebSocketManager] Heartbeat timeout for ${key} (${elapsed}ms), closing connection`
+        );
+        this.stopHeartbeat(key);
+        ws.close(4000, 'Heartbeat timeout');
+        return;
+      }
+
+      const timer = setTimeout(check, interval);
+      this.heartbeatTimers.set(key, timer);
+    };
+
+    const timer = setTimeout(check, interval);
+    this.heartbeatTimers.set(key, timer);
+  }
+
+  /**
+   * 停止心跳检测并清理相关资源
+   */
+  private stopHeartbeat(key: string): void {
+    const timer = this.heartbeatTimers.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      this.heartbeatTimers.delete(key);
+    }
+    this.lastMessageTimes.delete(key);
   }
 
   /**
@@ -197,6 +265,7 @@ export class WebSocketManager {
     // 清理资源
     this.connections.delete(key);
     this.subscriptions.delete(key);
+    this.stopHeartbeat(key);
 
     const timer = this.reconnectTimers.get(key);
     if (timer) {
@@ -229,10 +298,13 @@ export class WebSocketManager {
 
     // 清理所有定时器
     this.reconnectTimers.forEach((timer) => clearTimeout(timer));
+    this.heartbeatTimers.forEach((timer) => clearTimeout(timer));
 
     // 清空所有 Map
     this.connections.clear();
     this.subscriptions.clear();
     this.reconnectTimers.clear();
+    this.heartbeatTimers.clear();
+    this.lastMessageTimes.clear();
   }
 }

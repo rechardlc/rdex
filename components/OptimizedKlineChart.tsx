@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
 import {
   createChart,
   IChartApi,
@@ -11,7 +11,17 @@ import {
 import { Maximize2, Minimize2, AlertCircle, Loader2 } from 'lucide-react';
 import { useKlineData, useKlineSubscription } from '@/hooks/useKlineData';
 import { useAutoLoadKlineData } from '@/hooks/useAutoLoadKlineData';
-import { KlineInterval } from '@/lib/kline/types';
+import { CandlestickData, KlineInterval } from '@/lib/kline/types';
+
+/**
+ * 根据容器宽度计算合适的 barSpacing（纯函数，无副作用）
+ */
+function calculateBarSpacing(width: number): number {
+  if (width < 768) return 4;
+  if (width < 1200) return 6;
+  if (width < 1600) return 8;
+  return 10;
+}
 
 /**
  * 优化版 K 线图组件（基于 TanStack Query）
@@ -58,7 +68,34 @@ export function OptimizedKlineChart({
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  /**
+   * 使用 useSyncExternalStore 订阅全屏状态，消除 isFullscreen 冗余 state
+   * 全屏变化时同时触发图表 resize
+   */
+  const isFullscreen = useSyncExternalStore(
+    useCallback((onStoreChange: () => void) => {
+      const handleFullscreenChange = () => {
+        onStoreChange();
+        // 延迟执行 resize，等待浏览器完成全屏过渡
+        setTimeout(() => {
+          if (chartContainerRef.current && chartRef.current) {
+            const width = chartContainerRef.current.clientWidth;
+            chartRef.current.applyOptions({
+              width,
+              height: document.fullscreenElement ? window.innerHeight - 60 : 400,
+            });
+            chartRef.current.timeScale().applyOptions({
+              barSpacing: calculateBarSpacing(width),
+            });
+          }
+        }, 100);
+      };
+      document.addEventListener('fullscreenchange', handleFullscreenChange);
+      return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    }, []),
+    () => !!document.fullscreenElement,
+    () => false
+  );
 
   // 根据配置选择使用普通加载或自动加载
   const normalData = useKlineData({
@@ -83,108 +120,58 @@ export function OptimizedKlineChart({
   const isFetchingPrevious = enableAutoLoad ? autoLoadData.isFetchingPrevious : false;
   const hasMore = enableAutoLoad ? autoLoadData.hasMore : false;
 
-  // 订阅实时数据更新
+  /**
+   * 稳定的 onUpdate 回调，避免 useKlineSubscription 因回调变化而重复订阅
+   * 使用 ref 获取 seriesRef.current，保证始终拿到最新实例
+   */
+  const handleKlineUpdate = useCallback((klineData: CandlestickData) => {
+    seriesRef.current?.update(klineData);
+  }, []);
+
   useKlineSubscription({
     symbol,
     interval,
     enabled: !!data && !isLoading,
-    onUpdate: (klineData) => {
-      if (seriesRef.current) {
-        seriesRef.current.update(klineData);
-      }
-    },
+    onUpdate: handleKlineUpdate,
   });
 
   /**
-   * 切换全屏
+   * 切换全屏（事件处理函数，无 Effect）
+   * 全屏状态由 useSyncExternalStore 订阅 fullscreenchange 自动同步
    */
-  const toggleFullscreen = async () => {
+  const toggleFullscreen = useCallback(async () => {
     if (!wrapperRef.current) return;
-
     try {
       if (!document.fullscreenElement) {
         await wrapperRef.current.requestFullscreen();
-        setIsFullscreen(true);
       } else {
         await document.exitFullscreen();
-        setIsFullscreen(false);
       }
     } catch (error) {
       console.error('Error toggling fullscreen:', error);
     }
-  };
-
-  /**
-   * 根据容器宽度计算合适的 barSpacing
-   */
-  const calculateBarSpacing = useCallback((width: number): number => {
-    if (width < 768) {
-      return 4; // 小屏幕
-    } else if (width < 1200) {
-      return 6; // 中等屏幕
-    } else if (width < 1600) {
-      return 8; // 大屏幕
-    } else {
-      return 10; // 超大屏幕
-    }
   }, []);
 
   /**
-   * 防抖 resize 处理
+   * 防抖 resize 处理（事件处理函数）
    */
   const handleResize = useCallback(() => {
     if (resizeTimeoutRef.current) {
       clearTimeout(resizeTimeoutRef.current);
     }
-
     resizeTimeoutRef.current = setTimeout(() => {
       if (chartContainerRef.current && chartRef.current) {
         const width = chartContainerRef.current.clientWidth;
-        const barSpacing = calculateBarSpacing(width);
-
-        chartRef.current.applyOptions({
-          width,
-        });
-
+        chartRef.current.applyOptions({ width });
         chartRef.current.timeScale().applyOptions({
-          barSpacing,
+          barSpacing: calculateBarSpacing(width),
         });
       }
     }, 100);
-  }, [calculateBarSpacing]);
+  }, []);
 
   /**
-   * 监听全屏状态变化
-   */
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-
-      if (chartContainerRef.current && chartRef.current) {
-        setTimeout(() => {
-          const width = chartContainerRef.current!.clientWidth;
-          const barSpacing = calculateBarSpacing(width);
-
-          chartRef.current?.applyOptions({
-            width,
-            height: document.fullscreenElement ? window.innerHeight - 60 : 400,
-          });
-
-          chartRef.current?.timeScale().applyOptions({
-            barSpacing,
-          });
-        }, 100);
-      }
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    };
-  }, [calculateBarSpacing]);
-
-  /**
-   * 初始化图表
+   * 初始化图表（与 DOM + lightweight-charts 外部系统同步，必须保留 Effect）
    */
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -250,7 +237,7 @@ export function OptimizedKlineChart({
       }
       chart.remove();
     };
-  }, [handleResize, calculateBarSpacing]);
+  }, [handleResize]);
 
   /**
    * 当数据加载完成后更新图表

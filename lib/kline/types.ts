@@ -108,6 +108,16 @@ export enum WebSocketState {
 }
 
 /**
+ * 心跳检测配置
+ */
+export interface HeartbeatOptions {
+  /** 检测间隔（毫秒），默认 30000 */
+  interval?: number;
+  /** 无消息超时（毫秒），超时则判定连接失效并触发重连，默认 60000 */
+  timeout?: number;
+}
+
+/**
  * WebSocket 订阅配置
  */
 export interface WebSocketSubscription {
@@ -117,6 +127,8 @@ export interface WebSocketSubscription {
   state: WebSocketState;
   reconnectAttempts: number;
   maxReconnectAttempts: number;
+  /** 心跳检测配置（可选，不传则使用默认值） */
+  heartbeat?: HeartbeatOptions;
 }
 
 /**

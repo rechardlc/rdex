@@ -73,6 +73,7 @@ export type {
   KlineInterval,
   IKlineDataSource,
   KlineChartConfig,
+  HeartbeatOptions,
 } from './types';
 
 // ============= 数据源实现 =============
